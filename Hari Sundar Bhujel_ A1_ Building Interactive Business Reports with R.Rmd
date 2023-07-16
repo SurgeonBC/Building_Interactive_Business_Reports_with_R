@@ -1,0 +1,125 @@
+---
+title: "Surgeon"
+output: html_document
+date: "2023-07-15"
+runtime: shiny
+---
+```{r}
+library(shiny)
+library(forecast)
+library(tidyverse)
+
+sales <- "https://raw.githubusercontent.com/multidis/hult-inter-bus-reports-r/main/forecasting/sales_weekly.csv"
+
+sales <- read_csv(sales)
+
+ui <- fluidPage(
+  titlePanel("Sales Forecasting Application"),
+
+  sidebarLayout(
+    sidebarPanel(
+      selectInput("storenum", 
+                  label = "Select store: ",
+                  choices = 1:max(sales$Store), 
+                  selected = 1),
+      
+      sliderInput("weeknum", 
+                  label = "Select week: ", 
+                  min = 0, 
+                  max = 142, 
+                  value = 0, 
+                  step = 1),
+      
+      sliderInput("confidence", 
+                  label = "Confidence level for forecast: ", 
+                  min = 0.80, 
+                  max = 0.99, 
+                  value = 0.95, 
+                  step = 0.01)
+    ),
+
+    mainPanel(
+      plotOutput("quarterForecastPlot"),
+      plotOutput("weekForecastPlot"),
+      plotOutput("confidenceIntervalPlot"),
+      plotOutput("compareYearlySalesPlot")
+    )
+  )
+)
+
+
+```
+
+```{r}
+server <- function(input, output) {
+  
+  fsales <- "https://raw.githubusercontent.com/multidis/hult-inter-bus-reports-r/main/forecasting/sales_weekly.csv"
+  sales <- read_csv(fsales)
+
+  # For code reusability, create a function for ARIMA prediction
+  arima_pred_func <- function(data, horizon, level) {
+    sales_ts <- ts(data, frequency = 52)
+    arima_model <- auto.arima(sales_ts, seasonal.test = "seas")
+    forecast(arima_model, h = horizon, level = level)
+  }
+  
+  output$quarterForecastPlot <- renderPlot({
+    # Filter for the store
+    storeData <- sales %>% filter(Store == input$storenum)
+    
+    # Perform ARIMA prediction for the upcoming 13 weeks (1 quarter)
+    arima_pred <- arima_pred_func(storeData$Weekly_Sales, 13, input$confidence * 100)
+
+    autoplot(arima_pred) +
+      labs(x = "Weeks ahead", y = "Sales", title = "Quarterly Sales Forecast")
+  })
+  
+  output$weekForecastPlot <- renderPlot({
+    # Filter for the store
+    storeData <- sales %>% filter(Store == input$storenum)
+    
+    # Perform ARIMA prediction for the selected week within the next three months
+    arima_pred <- arima_pred_func(storeData$Weekly_Sales, input$weeknum, input$confidence * 100)
+    
+    autoplot(arima_pred) +
+      labs(x = "Weeks ahead", y = "Sales", title = "Weekly Sales Forecast")
+  })
+  
+  output$confidenceIntervalPlot <- renderPlot({
+    # Filter for the store
+    storeData <- sales %>% filter(Store == input$storenum)
+    
+    # Perform ARIMA prediction for the next month (4 weeks) with confidence intervals
+    arima_pred <- arima_pred_func(storeData$Weekly_Sales, 4, input$confidence * 100)
+    
+    autoplot(arima_pred) +
+      labs(x = "Weeks ahead", y = "Sales", title = "Sales Forecast with Confidence Intervals")
+  })
+  
+  output$compareYearlySalesPlot <- renderPlot({
+    # Filter for the store
+    storeData <- sales %>% filter(Store == input$storenum)
+    
+    # Perform ARIMA prediction for the next year (52 weeks)
+    arima_pred <- arima_pred_func(storeData$Weekly_Sales, 52, input$confidence * 100)
+    
+    # Combine actual and forecast sales data
+    sales_data <- data.frame(Week = c(1:length(storeData$Weekly_Sales), (length(storeData$Weekly_Sales)+1):(length(storeData$Weekly_Sales)+52)),
+                             Sales = c(storeData$Weekly_Sales, as.numeric(arima_pred$mean)),
+                             Type = c(rep("Actual", length(storeData$Weekly_Sales)), rep("Forecast", 52)))
+    
+    ggplot(sales_data, aes(x = Week, y = Sales, color = Type)) +
+      geom_line() +
+      labs(x = "Week", y = "Sales", title = "Yearly Sales Comparison")
+  })
+}
+
+shinyApp(ui = ui, server = server)
+
+
+
+```
+
+```{r}
+
+```
