@@ -1,0 +1,177 @@
+---
+title: "Surgeon"
+output: html_document
+date: "2023-07-15"
+runtime: shiny
+---
+```{r}
+library(shiny)
+library(forecast)
+library(tidyverse)
+
+sales <- "https://raw.githubusercontent.com/multidis/hult-inter-bus-reports-r/main/forecasting/sales_weekly.csv"
+
+sales <- read_csv(sales)
+
+
+ui <- fluidPage(
+  tags$head(
+    tags$style(
+      HTML("
+        .title {
+          text-align: center;
+        }
+      ")
+    )
+  ),
+  div(class = "title", titlePanel("Sales Forecasting")),
+
+  fluidRow(
+    column(width = 4, offset = 4,
+      selectInput("storenum", 
+                  label = "Select store: ",
+                  choices = 1:max(sales$Store), 
+                  selected = 1),
+      
+      sliderInput("weeknum", 
+                  label = "Select week: ", 
+                  min = 0, 
+                  max = 142, 
+                  value = 0, 
+                  step = 1),
+      
+    sliderInput("confidence", 
+                label = "Confidence level for forecast: ", 
+                min = 0, 
+                max = 1, 
+                value = 0.95, 
+                step = 0.01)
+
+    )
+  ),
+
+  mainPanel(
+    
+    plotOutput("weekForecastPlot"),
+    plotOutput("confidenceIntervalPlot"),
+    plotOutput("compareYearlySalesPlot"),
+    plotOutput("quarterForecastPlot")
+  )
+)
+
+
+```
+
+```{r}
+server <- function(input, output) {
+  
+  fsales <- "https://raw.githubusercontent.com/multidis/hult-inter-bus-reports-r/main/forecasting/sales_weekly.csv"
+  sales <- read_csv(fsales)
+
+  # For code reusability, create a function for ARIMA prediction
+  arima_pred_func <- function(data, horizon, level) {
+    sales_ts <- ts(data, frequency = 52)
+    arima_model <- auto.arima(sales_ts, seasonal.test = "seas")
+    forecast(arima_model, h = horizon, level = level)
+  }
+  
+  output$quarterForecastPlot <- renderPlot({
+    # Filter for the store
+    storeData <- sales %>% filter(Store == input$storenum)
+    
+    # Perform ARIMA prediction for the upcoming 13 weeks (1 quarter)
+    arima_pred <- arima_pred_func(storeData$Weekly_Sales, 13, input$confidence * 100)
+
+    autoplot(arima_pred) +
+      theme_minimal() +
+      theme(plot.margin = margin(20, 20, 20, 20),
+            plot.background = element_rect(fill = "white"),
+            panel.grid = element_blank(),
+            panel.border = element_blank()) +
+      geom_line(color = "orange", size = 1.5) +
+      labs(x = "Weeks ahead", y = "Sales", title = "Quarterly Sales Forecast") +
+      geom_hline(yintercept = mean(storeData$Weekly_Sales), linetype = "dashed", color = "blue") +
+      geom_text(x = 2, y = mean(storeData$Weekly_Sales), label = "Mean", vjust = -1, color = "blue")
+  })
+  
+  output$weekForecastPlot <- renderPlot({
+    # Filter for the store
+    storeData <- sales %>% filter(Store == input$storenum)
+    
+    # Perform ARIMA prediction for the selected week within the next three months
+    arima_pred <- arima_pred_func(storeData$Weekly_Sales, input$weeknum, input$confidence * 100)
+    
+    # Convert forecast object to data frame
+    forecast_df <- data.frame(WeeksAhead = 1:input$weeknum, Forecast = arima_pred$mean[1:input$weeknum], 
+                              Lower = arima_pred$lower[1:input$weeknum, 1], 
+                              Upper = arima_pred$upper[1:input$weeknum, 1])
+    
+    # Plot the forecast line and confidence intervals
+    ggplot(forecast_df, aes(x = WeeksAhead)) +
+      geom_ribbon(aes(ymin = Lower, ymax = Upper), fill = "lightgreen", alpha = 0.3) +
+      geom_line(aes(y = Forecast), color = "orange", size = 1.5) +
+      theme_minimal() +
+      theme(plot.margin = margin(20, 20, 20, 20),
+            plot.background = element_rect(fill = "white"),
+            panel.grid = element_blank(),
+            panel.border = element_blank()) +
+      labs(x = "Weeks ahead", y = "Sales", title = "Weekly Sales Forecast") +
+      geom_hline(yintercept = mean(storeData$Weekly_Sales), linetype = "dashed", color = "blue") +
+      geom_text(x = input$weeknum, y = mean(storeData$Weekly_Sales), label = "Mean", vjust = -1, color = "blue")
+  })
+  
+  output$confidenceIntervalPlot <- renderPlot({
+    # Filter for the store
+    storeData <- sales %>% filter(Store == input$storenum)
+    
+    # Perform ARIMA prediction for the next month (4 weeks) with confidence intervals
+    arima_pred <- arima_pred_func(storeData$Weekly_Sales, 4, input$confidence * 100)
+    
+    # Convert forecast object to data frame
+    forecast_df <- data.frame(WeeksAhead = 1:4, Forecast = arima_pred$mean[1:4], 
+                              Lower = arima_pred$lower[1:4, 1], 
+                              Upper = arima_pred$upper[1:4, 1])
+    
+    # Plot the forecast line and confidence intervals
+    ggplot(forecast_df, aes(x = WeeksAhead)) +
+      geom_ribbon(aes(ymin = Lower, ymax = Upper), fill = "lightgreen", alpha = 0.3) +
+      geom_line(aes(y = Forecast), color = "orange", size = 1.5) +
+      theme_minimal() +
+      theme(plot.margin = margin(20, 20, 20, 20),
+            plot.background = element_rect(fill = "white"),
+            panel.grid = element_blank(),
+            panel.border = element_blank()) +
+      labs(x = "Weeks ahead", y = "Sales", title = "Sales Forecast with Confidence Intervals") +
+      geom_hline(yintercept = mean(storeData$Weekly_Sales), linetype = "dashed", color = "blue") +
+      geom_text(x = 2, y = mean(storeData$Weekly_Sales), label = "Mean", vjust = -1, color = "blue")
+  })
+  
+  output$compareYearlySalesPlot <- renderPlot({
+    # Filter for the store
+    storeData <- sales %>% filter(Store == input$storenum)
+    
+    # Perform ARIMA prediction for the next year (52 weeks)
+    arima_pred <- arima_pred_func(storeData$Weekly_Sales, 52, input$confidence * 100)
+    
+    # Combine actual and forecast sales data
+    sales_data <- data.frame(Week = c(1:length(storeData$Weekly_Sales), (length(storeData$Weekly_Sales)+1):(length(storeData$Weekly_Sales)+52)),
+                             Sales = c(storeData$Weekly_Sales, as.numeric(arima_pred$mean)),
+                             Type = c(rep("Actual", length(storeData$Weekly_Sales)), rep("Forecast", 52)))
+    
+    ggplot(sales_data, aes(x = Week, y = Sales, color = Type)) +
+      geom_line(size = 1.5) +
+      theme_minimal() +
+      theme(plot.margin = margin(20, 20, 20, 20),
+            plot.background = element_rect(fill = "white"),
+            panel.grid = element_blank(),
+            panel.border = element_blank()) +
+      labs(x = "Week", y = "Sales", title = "Yearly Sales Comparison") +
+      geom_hline(yintercept = mean(storeData$Weekly_Sales), linetype = "dashed", color = "blue") +
+      geom_text(x = length(storeData$Weekly_Sales) + 26, y = mean(storeData$Weekly_Sales), label = "Mean", vjust = -1, color = "blue")
+  })
+}
+
+shinyApp(ui = ui, server = server)
+
+
+```
